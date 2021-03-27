@@ -127,3 +127,13 @@ kmModel.computeCost(transformedTraining)
 val rdd1=spark.sparkContext.parallelize(Seq(1, 2, 3,4,5,6,7,8,9,10)).toDF()
 // show the values in the rdd
 rdd1.collect()
+// Spark as a progrmming language - performing addition in Spark (not in Scala or Python)
+val df = spark.range(15).toDF("number")
+df.show()
+val df2=df.select(df.col("number") + 10)
+df2.show()
+// create a row using a range
+spark.range(15).toDF().show()
+// declare a column to be an IntegerType column
+import org.apache.spark.sql.types._
+val b = IntegerType
