@@ -304,3 +304,40 @@ collectDF.show()
 collectDF.show(5, false)
 //collect rows to the driver - this can crash the driver 
 collectDF.collect()
+// read the DataFrame that we will use for analysis
+val df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load("/user/sjf/data/retail_data/by_day/2010-12-01.csv")
+// view the column names and data types, this is similar to DESCRIBE Table in Spark SQL
+df.printSchema()
+// convert the dataFrame to a veiew and then DESCRIBE that view
+df.createOrReplaceTempView("dfTable")
+spark.sql("""DESCRIBE dfTable""").show()
+//converting to Spark data types with the lit function - the rows are infinite here
+import org.apache.spark.sql.functions.lit
+df.select(lit(5), lit("five"), lit(5.0)).show(10000)
+//showing a literal being created in Spark SQL - only one row is created here
+spark.sql("""SELECT 5, "five", 5.0""").show()
+//there are different ways of specifying equality - the first example shows the equalTo() method
+import org.apache.spark.sql.functions.col
+df.where(col("InvoiceNo").equalTo(536365)).select("InvoiceNo", "Description").show(5, true) 
+// Scala uses the triple equal sign to express equality
+import org.apache.spark.sql.functions.col
+df.where(col("InvoiceNo") === 536365).select("InvoiceNo", "Description").show(5, false)
+// the simplest method is to specify the predicate as an expression in a string
+df.where("InvoiceNo = 536365").show(5, false)
+// using not equal to as a string expression
+df.where("InvoiceNo <> 536365").show(5, false)
+// specifying a boolean column as part of a filter
+val priceFilter = col("UnitPrice") > 600
+val descripFilter = col("Description").contains("POSTAGE")
+df.where(col("StockCode").isin("DOT")).where(priceFilter.or(descripFilter)).show()
+//specifyng a boolean column to get the unit prices for the expensive items using a Spark dataFrame
+val DOTCodeFilter = col("StockCode") === "DOT"
+val priceFilter = col("UnitPrice") > 600
+val descripFilter = col("Description").contains("POSTAGE")
+df.withColumn("isExpensive", DOTCodeFilter.and(priceFilter.or(descripFilter))).where("isExpensive").select("unitPrice", "isExpensive").show(5)
+//specifying a boolean column to get the unit prices for the expensive items using Spark SQL
+spark.sql("""SELECT UnitPrice, (StockCode = 'DOT' AND 
+(UnitPrice > 600 OR instr(Description, "POSTAGE") >= 1)) as isExpensive 
+FROM dfTable
+WHERE (StockCode = 'DOT' AND
+(UnitPrice > 600 OR instr(Description, "POSTAGE") >= 1))""").show(5)
