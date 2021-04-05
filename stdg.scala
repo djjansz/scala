@@ -341,3 +341,197 @@ spark.sql("""SELECT UnitPrice, (StockCode = 'DOT' AND
 FROM dfTable
 WHERE (StockCode = 'DOT' AND
 (UnitPrice > 600 OR instr(Description, "POSTAGE") >= 1))""").show(5)
+// read the DataFrame that we will use for analysis
+val df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load("/user/sjf/data/retail_data/by_day/2010-12-01.csv")
+// view the column names and data types, this is similar to DESCRIBE Table in Spark SQL
+df.printSchema()
+// convert the dataFrame to a veiew and then DESCRIBE that view
+df.createOrReplaceTempView("dfTable")
+spark.sql("""DESCRIBE dfTable""").show()
+//converting to Spark data types with the lit function - the rows are infinite here
+import org.apache.spark.sql.functions.lit
+df.select(lit(5), lit("five"), lit(5.0)).show(10000)
+//showing a literal being created in Spark SQL - only one row is created here
+spark.sql("""SELECT 5, "five", 5.0""").show()
+//there are different ways of specifying equality - the first example shows the equalTo() method
+import org.apache.spark.sql.functions.col
+df.where(col("InvoiceNo").equalTo(536365)).select("InvoiceNo", "Description").show(5, true) 
+// Scala uses the triple equal sign to express equality
+import org.apache.spark.sql.functions.col
+df.where(col("InvoiceNo") === 536365).select("InvoiceNo", "Description").show(5, false)
+// the simplest method is to specify the predicate as an expression in a string
+df.where("InvoiceNo = 536365").show(5, false)
+// using not equal to as a string expression
+df.where("InvoiceNo <> 536365").show(5, false)
+// specifying a boolean column as part of a filter
+val priceFilter = col("UnitPrice") > 600
+val descripFilter = col("Description").contains("POSTAGE")
+df.where(col("StockCode").isin("DOT")).where(priceFilter.or(descripFilter)).show()
+//specifyng a boolean column to get the unit prices for the expensive items using a Spark dataFrame
+val DOTCodeFilter = col("StockCode") === "DOT"
+val priceFilter = col("UnitPrice") > 600
+val descripFilter = col("Description").contains("POSTAGE")
+df.withColumn("isExpensive", DOTCodeFilter.and(priceFilter.or(descripFilter))).where("isExpensive").select("unitPrice", "isExpensive").show(5)
+//specifying a boolean column to get the unit prices for the expensive items using Spark SQL
+spark.sql("""SELECT UnitPrice, (StockCode = 'DOT' AND 
+(UnitPrice > 600 OR instr(Description, "POSTAGE") >= 1)) as isExpensive 
+FROM dfTable
+WHERE (StockCode = 'DOT' AND
+(UnitPrice > 600 OR instr(Description, "POSTAGE") >= 1))""").show(5)
+//express filters using the dataFrame interface
+import org.apache.spark.sql.functions.{expr, not, col}
+df.withColumn("isExpensive", not(col("UnitPrice").leq(250)))
+.filter("isExpensive")
+.select("Description", "UnitPrice").show(5)
+// expressing a filter as a SQL statement
+df.withColumn("isExpensive", expr("NOT UnitPrice <= 250"))
+.filter("isExpensive")
+.select("Description", "UnitPrice").show(5)
+//to the power of 2 - imagine that we miscounted the stock and the real supply is equal to fabricatedQuantity = (quantity*unit_price)^2 + 5
+import org.apache.spark.sql.functions.{expr, pow}
+val fabricatedQuantity = round(pow(col("Quantity") * col("UnitPrice"), 2) + 5,1)
+df.select(expr("CustomerId"),expr("Quantity"),expr("round(UnitPrice,1)").alias("UnitPrice"), fabricatedQuantity.alias("realQuantity")).show(2)
+//using a SQL expression with the dataFrame interface
+df.selectExpr("CustomerId","Quantity","UnitPrice","round((POWER((Quantity * UnitPrice), 2.0) + 5),1) as realQuantity").show(2)
+//Doing the same thing in Spark SQL 
+spark.sql("""SELECT customerId, Quantity, UnitPrice,ROUND((POWER((Quantity * UnitPrice), 2.0) + 5),1) as realQuantity FROM dfTable""").show(2)
+// in Scala
+import org.apache.spark.sql.functions.{round, bround}
+//bround rounds down when it's right on the border
+import org.apache.spark.sql.functions.lit
+df.select(round(lit("2.5")), bround(lit("2.5"))).show(2)
+//  correlation between quantity and unit price is -.041, so when quantity goes up, then the unit price should go down a little bit
+import org.apache.spark.sql.functions.{corr}
+df.stat.corr("Quantity", "UnitPrice") // correlation calculated using the dataframe stat method
+df.select(corr("Quantity", "UnitPrice")).show() // correlation calculated using the corr function for SQL
+// the describe method in scala is similar to the summary function in R - it calculates the count, mean, stdev, min and max
+df.describe().show()
+// Quantity is on the top going from left to right while StockCode goes up and down on the side in this crosstab
+df.stat.crosstab("StockCode", "Quantity").show()
+// freqItems shows the StockCodes for the most popular items as ranked by the Quantity sold
+df.stat.freqItems(Seq("StockCode", "Quantity")).show()
+// the monotonically_increasing_id function in Scala is similar to the internal variable _n_ in the SAS DATA Step
+import org.apache.spark.sql.functions.monotonically_increasing_id
+df.select($"StockCode",monotonically_increasing_id().alias("monotinc")).show(10)
+// capitalize every initial word in a string, similar to Excel's PROPCASE function
+import org.apache.spark.sql.functions.{initcap}
+df.select($"Description",initcap(col("Description"))).show(2, false)
+// make an all upper case columna nd an all lower case column
+import org.apache.spark.sql.functions.{lower, upper}
+df.select(col("Description"),lower(col("Description")),upper(lower(col("Description")))).show(2)
+// adding or removing spaces around a string with left/right pad/trim
+import org.apache.spark.sql.functions.{lit, ltrim, rtrim, rpad, lpad, trim}
+df.select(
+ltrim(lit("    HELLO    ")).as("ltrim"),
+rtrim(lit("    HELLO    ")).as("rtrim"),
+trim(lit("    HELLO    ")).as("trim"),
+lpad(lit("HELLO"), 3, " ").as("lp"),
+rpad(lit("HELLO"), 10, " ").as("rp")).show(2)
+// 
+import org.apache.spark.sql.functions.regexp_replace
+//create a Seq[String] = List(black, white, red, green, blue)
+val simpleColors = Seq("black", "white", "red", "green", "blue")
+// String = BLACK|WHITE|RED|GREEN|BLUE
+val regexString = simpleColors.map(_.toUpperCase).mkString("|")
+// the | signifies `OR` in regular expression syntax - here we replace the colors with the word COLOR
+df.select(regexp_replace(col("Description"), regexString, "COLOR").alias("color_clean"),col("Description")).show(10,false)
+spark.sql("""SELECT regexp_replace(Description, 'BLACK|WHITE|RED|GREEN|BLUE', 'COLOR') as color_clean, Description FROM dfTable""").show(10,false)
+// L gets replaced by 1, E gets replaced by 3, and T gets replaced by 7
+import org.apache.spark.sql.functions.translate
+df.select(translate(col("Description"), "LEET", "1337").alias("color_clean"), col("Description")).show(2,false)
+spark.sql("""SELECT translate(Description, 'LEET', '1337'), Description FROM dfTable""").show(2,false)
+// using regexp_extract to extract the colors Black, White, Red, Green, or Blue, from the column
+import org.apache.spark.sql.functions.regexp_extract
+val regexString = simpleColors.map(_.toUpperCase).mkString("(", "|", ")")
+df.select(regexp_extract(col("Description"), regexString, 1).alias("color_clean"),col("Description")).show(10,false)
+spark.sql("""SELECT regexp_extract(Description, '(BLACK|WHITE|RED|GREEN|BLUE)', 1) as color_clean, Description FROM dfTable""").show(10,false)
+// Using the contains method to filter out only rows that contain the text BLACK or WHITE
+val containsBlack = col("Description").contains("BLACK")
+val containsWhite = col("DESCRIPTION").contains("WHITE")
+df.withColumn("hasSimpleColor", containsBlack.or(containsWhite)).where("hasSimpleColor").select("Description").show(50, false)
+spark.sql("""SELECT Description FROM dfTable WHERE instr(Description, 'BLACK') >= 1 OR instr(Description, 'WHITE') >= 1""").show(50,false)
+// filter out only the rows that contain the text BLACK or WHITE in a more dynamic way
+val simpleColors = Seq("black", "white", "red", "green", "blue")
+val selectedColumns = simpleColors.map(color => {col("Description").contains(color.toUpperCase).alias(s"is_$color")}):+expr("*") 
+df.select(selectedColumns:_*).where(col("is_white").or(col("is_black"))).select("Description").show(30, false)
+// Dates and Times - onnly InvoiceDate is a timestamp in this dataFrame
+df.printSchema()
+// create a dataFrame with 10 rows of the same thing which is the current date and the current time
+import org.apache.spark.sql.functions.{current_date, current_timestamp}
+val dateDF = spark.range(10).withColumn("today", current_date()).withColumn("now", current_timestamp())
+dateDF.createOrReplaceTempView("dateTable")
+dateDF.show(10)
+dateDF.printSchema()
+// today -5 days, today + 5 days
+import org.apache.spark.sql.functions.{date_add, date_sub}
+dateDF.select(date_sub(col("today"), 5), date_add(col("today"), 5)).show(1)
+spark.sql("""SELECT date_sub(today, 5), date_add(today, 5) FROM dateTable""").show(1)
+// findiing the days between two dates and the months between two dates
+import org.apache.spark.sql.functions.{datediff, months_between, to_date}
+dateDF.withColumn("week_ago", date_sub(col("today"), 7)).select(datediff(col("week_ago"), col("today"))).show(1)
+dateDF.select(to_date(lit("2016-01-01")).alias("start"),to_date(lit("2017-05-22")).alias("end")).select(months_between(col("start"), col("end"))).show(1)
+spark.sql("""SELECT to_date('2016-01-01'), months_between('2016-01-01', '2017-01-01'),datediff('2016-01-01', '2017-01-01') FROM dateTable""").show(1)
+// the to_date functions converts a string into a date
+import org.apache.spark.sql.functions.{to_date, lit}
+spark.range(5).withColumn("date", lit("2017-01-01")).select(to_date(col("date"))).show(1)
+// this shows the null that is generated when the to_date is ommitted
+dateDF.select(to_date(lit("2016-20-12")),to_date(lit("2017-12-11"))).show(1)
+// the dateFormat as an arugument for the to_date function to tell Spark that the format is year, day, month
+import org.apache.spark.sql.functions.to_date
+val dateFormat = "yyyy-dd-MM" 
+val cleanDateDF = spark.range(1).select(to_date(lit("2017-12-11"), dateFormat).alias("date"),to_date(lit("2017-20-12"), dateFormat).alias("date2"))
+cleanDateDF.createOrReplaceTempView("dateTable2")
+cleanDateDF.show(1)
+spark.sql("""SELECT to_date(date, 'yyyy-dd-MM'), to_date(date2, 'yyyy-dd-MM'), to_date(date) FROM dateTable2""").show(1)
+// changing the date to a timestamp - the timestamp function requires that a format be specified
+import org.apache.spark.sql.functions.to_timestamp
+cleanDateDF.select(to_timestamp(col("date"), dateFormat)).show()
+spark.sql("""SELECT to_timestamp(date, 'yyyy-dd-MM'), to_timestamp(date2, 'yyyy-dd-MM') FROM dateTable2""").show()
+// filtering with dates - the filter is interpreted as yyyy-mm-dd here
+cleanDateDF.filter(col("date2") > lit("2017-12-20")).show()
+// filtering as a string which Spark parses to a literal does not work on date variables
+cleanDateDF.filter(col("date2") > "'2017-12-20'").show()
+// the coalese function selects the first non-null values from a set of columns
+import org.apache.spark.sql.functions.coalesce
+df.select(coalesce(col("Description"), col("CustomerId"))).show()
+// drop if any of the rows are all NULL
+df.na.drop("all", Seq("StockCode", "InvoiceNo")).show(1)
+// replace NULL values in columns of type string
+df.na.fill("All Null values become this string").show(1)
+// replace NULL values with 5
+df.na.fill(5, Seq("StockCode", "InvoiceNo"))
+// using a Scala map to fill in NULL values
+val fillColValues = Map("StockCode" -> 5, "Description" -> "No Value")
+df.na.fill(fillColValues).show(1)
+// complex structures - the struct is a set of columns that are dealt together
+import org.apache.spark.sql.functions.struct
+val complexDF = df.select(struct("Description", "InvoiceNo").alias("complex"))
+complexDF.createOrReplaceTempView("complexDF")
+// Using the dot notation and the getfield method to work with the struct
+complexDF.select("complex.Description").show(1)
+complexDF.select(col("complex").getField("Description")).show(1,false)
+//show the complex Scala map as a column
+spark.sql("""SELECT map(Description, InvoiceNo) as complex_map FROM dfTable WHERE Description IS NOT NULL""").show(5,false)
+//select all values in the strct with *
+complexDF.select("complex.*").show(1,false)
+// using an array to split text like the words in a book
+import org.apache.spark.sql.functions.split
+df.select(split(col("Description"), " ")).show(20,false)
+df.select(split(col("Description"), " ").alias("array_col")).selectExpr("array_col[0]").show(20,false)
+// create an exploded column that contains one row per word in a Description
+spark.sql("""SELECT Description, InvoiceNo, exploded FROM (SELECT *, split(Description, " ") as splitted FROM dfTable) LATERAL VIEW explode(splitted) as exploded""").show(10)
+// Check whether each row contains white using arrays
+import org.apache.spark.sql.functions.array_contains
+df.select(array_contains(split(col("Description"), " "), "WHITE")).show(20,false)
+// user-defined function to raise to the power of three
+val udfExampleDF = spark.range(5).toDF("num")
+def power3(number:Double):Double = number * number * number
+power3(2.0)
+// import the user defined functions package and register the power3udf function in metadata
+import org.apache.spark.sql.functions.udf
+val power3udf = udf(power3(_:Double):Double)
+udfExampleDF.select(power3udf(col("num"))).show()
+// register the power3 function as a Spark SQL function
+spark.udf.register("power3", power3(_:Double):Double)
+udfExampleDF.selectExpr("power3(num)").show(2)
+spark.sql("""SELECT power3(Quantity) as Quantity3,Quantity from dfTable""").show(10,false)
