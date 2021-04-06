@@ -542,3 +542,116 @@ udfExampleDF.select(power3udf(col("num"))).show()
 spark.udf.register("power3", power3(_:Double):Double)
 udfExampleDF.selectExpr("power3(num)").show(2)
 spark.sql("""SELECT power3(Quantity) as Quantity3,Quantity from dfTable""").show(10,false)
+// read in the data, repartitoining the data to have fewer partitions as these are small files
+val df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load("/user/sjf/data/retail_data/all/*.csv").coalesce(5)
+df.cache() // cache the results for faster access
+df.createOrReplaceTempView("dfTable") 
+// the dataframe count method is an action that is eagerly evaluated (not lazily)
+df.count() == 541909
+// the count aggregation function
+import org.apache.spark.sql.functions.count
+// the count function does not count nulls if a column is specified
+df.select(count("Description")).show() // 540,455
+// total row count - count star counts all rows including those that have all columns null
+spark.sql("""SELECT COUNT(*) FROM dfTable""").show() // 541,909
+//unique row count - count distinct star counts number of distinct rows
+spark.sql("""SELECT COUNT(DISTINCT *) FROM dfTable""").show() //401,604
+// the countDistinct aggregation function
+import org.apache.spark.sql.functions.countDistinct
+df.select(countDistinct("StockCode")).show() // 4,070
+spark.sql("""SELECT COUNT(DISTINCT StockCode) as distinct_stockcodes FROM dfTable""").show() // 4,070
+// approx_count_distinct(col) will save time versus count(disctinct col), although it is not as accurate
+import org.apache.spark.sql.functions.approx_count_distinct
+df.select(approx_count_distinct("StockCode", 0.1)).show() // 3,364
+spark.sql("""SELECT approx_count_distinct(StockCode, 0.1) FROM DFTABLE""").show() // 3,364
+// the first and last aggregation functions
+import org.apache.spark.sql.functions.{first, last}
+df.select(first("StockCode"), last("StockCode")).show() 
+spark.sql("""SELECT first(StockCode), last(StockCode) FROM dfTable""").show()
+// the min and max aggregation functions
+import org.apache.spark.sql.functions.{min, max}
+df.select(min("Quantity"), max("Quantity")).show() 
+spark.sql("""SELECT min(Quantity), max(Quantity) FROM dfTable""").show()
+// the sum aggregation function
+import org.apache.spark.sql.functions.sum
+df.select(sum("Quantity")).show() // 5,176,450
+spark.sql("""SELECT sum(Quantity) FROM dfTable""").show() // 5,176,450
+// the sumDistinct aggregation function
+import org.apache.spark.sql.functions.sumDistinct
+df.select(sumDistinct("UnitPrice")).show() // 611,388.39
+spark.sql("""SELECT SUM(Distinct UnitPrice) FROM dfTable""").show() // 611,388.39
+spark.sql("""SELECT SUM(UnitPrice) FROM dfTable""").show() // 2,498,803.97
+// the avg aggregation function
+import org.apache.spark.sql.functions.{sum, count, avg, expr}
+// the avg is equal to the mean which is equal to the sum divided by the count
+df.select(count("Quantity").alias("total_transactions"),sum("Quantity").alias("total_purchases"),avg("Quantity").alias("avg_purchases"),expr("mean(Quantity)").alias("mean_purchases")).selectExpr("total_purchases/total_transactions","avg_purchases","mean_purchases").show()
+// the variance and standard deviation aggregation functions
+import org.apache.spark.sql.functions.{var_pop, stddev_pop} // pop is short for population - the population stdev divides by n
+import org.apache.spark.sql.functions.{var_samp, stddev_samp} // samp is short for sample - the sample stdev divides by n-1
+df.select(var_pop("Quantity"), var_samp("Quantity")).show() // 47,559.3036 and 47,559.3914 - the sample variance is larger
+spark.sql("""SELECT var_pop(Quantity), var_samp(Quantity) FROM dfTable""").show() // 47,559.3036 and 47,559.3914 - the sample variance is larger
+df.select(stddev_pop("Quantity"), stddev_samp("Quantity")).show() //   218.0810 and  218.0812 - the sample standard deviation is larger
+spark.sql("""SELECT stddev_pop(Quantity), stddev_samp(Quantity) FROM dfTable""").show()  //   218.0810 and  218.0812 - the sample standard deviation is larger
+// the skewness and kurtosis aggregate functions
+import org.apache.spark.sql.functions.{skewness, kurtosis}
+df.select(skewness("Quantity"), kurtosis("Quantity")).show() // -0.2642 and 119,768.05496
+spark.sql("""SELECT skewness(Quantity), kurtosis(Quantity) FROM dfTable""").show() // -0.2642 and 119,768.05496
+// the correlation and covariance aggregation functions 
+import org.apache.spark.sql.functions.{corr, covar_pop, covar_samp}
+df.select(corr("InvoiceNo", "Quantity")).show() //.000491
+spark.sql("""SELECT corr(InvoiceNo, Quantity) FROM dfTable""").show() //.000491
+df.select(covar_pop("InvoiceNo", "Quantity"),covar_samp("InvoiceNo", "Quantity")).show() //1,052.7261 and 1,052.7281 - the sample covariance is larger
+spark.sql("""SELECT covar_pop(InvoiceNo, Quantity),covar_samp(InvoiceNo, Quantity) FROM dfTable""").show() //1,052.7261 and 1,052.7281 - the sample covariance is larger
+// in Scala
+import org.apache.spark.sql.functions.{collect_set, collect_list}
+df.agg(collect_set("Country"), collect_list("Country")).show() //collect_set de-dupes the data and creates a unique list while collect_list does not
+df.select(countDistinct("Country")).show() // 38
+spark.sql("""SELECT collect_set(Country) FROM dfTable""").show(1,false) // returns an array that holds the 38 countries
+spark.sql("""SELECT collect_list(Country) FROM dfTable""").show(1) // returns a giant array that extends past column 8 million of the text file if show(1,false) is added
+// the groupBy aggregation function
+df.groupBy("InvoiceNo", "CustomerId").count().show() //shows the row count for each combination of InvoiceNo and CustomerId
+// grouping with expressions
+import org.apache.spark.sql.functions.count
+df.groupBy("InvoiceNo").agg(count("Quantity").alias("quan"),expr("count(Quantity)")).show()
+// grouping with maps
+df.groupBy("InvoiceNo").agg("Quantity"->"avg", "Quantity"->"stddev_pop").sort("InvoiceNo").show()
+spark.sql("""SELECT  InvoiceNo, avg(Quantity), stddev_pop(Quantity) FROM dfTable GROUP BY InvoiceNo ORDER BY InvoiceNo""").show()
+// convert the InvoiceDate to a date column in preparation of working with Window functions
+import org.apache.spark.sql.functions.{col, to_date}
+val dfWithDate = df.withColumn("date", to_date(col("InvoiceDate"), "MM/d/yyyy H:mm"))
+dfWithDate.show(10,false)
+dfWithDate.createOrReplaceTempView("dfWithDate")
+// Window functions
+import org.apache.spark.sql.expressions.Window
+import org.apache.spark.sql.functions.col
+// partition by describes how we will break up the group, order determines ordering within a partition, the towsBetween states which rows will be included based on its reference to the current input row
+val windowSpec = Window.partitionBy("CustomerId", "date").orderBy(col("Quantity").desc).rowsBetween(Window.unboundedPreceding, Window.currentRow)
+import org.apache.spark.sql.functions.max
+val maxPurchaseQuantity = max(col("Quantity")).over(windowSpec)
+// the dense_rank() function is used to find the date at which the customer purchased the most quantity
+import org.apache.spark.sql.functions.{dense_rank, rank}
+val purchaseDenseRank = dense_rank().over(windowSpec) //dense rank has no breaks in rank, for example rank 1,1,2,3 (there is a tie for first place)
+val purchaseRank = rank().over(windowSpec) // rank has breaks in the rank, for example rank 1,1,3,4 (there is a tie for first place)
+import org.apache.spark.sql.functions.col
+dfWithDate.where("CustomerId IS NOT NULL").orderBy("CustomerId").select(col("CustomerId"),col("date"),col("Quantity"),purchaseRank.alias("quantityRank"),purchaseDenseRank.alias("quantityDenseRank"),maxPurchaseQuantity.alias("maxPurchaseQuantity")).show(100,false)
+spark.sql("""SELECT CustomerId, date, Quantity,rank(Quantity) OVER (PARTITION BY CustomerId, date ORDER BY Quantity DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as rank,
+dense_rank(Quantity) OVER (PARTITION BY CustomerId, date ORDER BY Quantity DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as dRank,
+max(Quantity) OVER (PARTITION BY CustomerId, date ORDER BY Quantity DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as maxPurchase
+FROM dfWithDate WHERE CustomerId IS NOT NULL ORDER BY CustomerId """).show(100,false)
+//Rollups - similar to multilabels with proc report to see different sums in the same aggregation table
+val dfNoNull = dfWithDate.drop()
+dfNoNull.createOrReplaceTempView("dfNoNull")
+val rolledUpDF = dfNoNull.rollup("Date", "Country").agg(sum("Quantity")).selectExpr("Date", "Country", "`sum(Quantity)` as total_quantity").orderBy("Date")rolledUpDF.show()
+// The NULL row here is the sum over all countries for a given date
+rolledUpDF.where("Country IS NULL").show()
+// the NULL row here shows the sum over all dates and countries
+rolledUpDF.where("Date IS NULL").show()
+// the cube rollsup over all dimensions similar to proc summary without the nway option to eliminate intermediate levels of summarization 
+dfNoNull.cube("Date", "Country").agg(sum(col("Quantity"))).select("Date", "Country", "sum(Quantity)").orderBy("Date").show()
+import org.apache.spark.sql.functions.{grouping_id, sum, expr}
+// grouping metadata - the grouping id is 3 - highest-level aggregation, 2 - aggregations of individual stockCodes, 1 - on a per customer basis, 0 - total quantity by customerID and stockCode
+dfNoNull.cube("customerId", "stockCode").agg(grouping_id(), sum("Quantity")).orderBy(expr("grouping_id()").desc).show()
+// Pivots - transposing the data
+val pivoted = dfWithDate.groupBy("date").pivot("Country").sum()
+pivoted.printSchema
+pivoted.where("date > '2011-12-05'").select("date" ,"`USA_sum(Quantity)`").show()
