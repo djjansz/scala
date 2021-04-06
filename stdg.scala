@@ -320,7 +320,7 @@ df.createOrReplaceTempView("dfTable")
 spark.sql("""DESCRIBE dfTable""").show()
 //converting to Spark data types with the lit function - the rows are infinite here
 import org.apache.spark.sql.functions.lit
-df.select(lit(5), lit("five"), lit(5.0)).show(10000)
+df.select(lit(5), lit("five"), lit(5.0)).show(100)
 //showing a literal being created in Spark SQL - only one row is created here
 spark.sql("""SELECT 5, "five", 5.0""").show()
 //there are different ways of specifying equality - the first example shows the equalTo() method
@@ -357,7 +357,7 @@ df.createOrReplaceTempView("dfTable")
 spark.sql("""DESCRIBE dfTable""").show()
 //converting to Spark data types with the lit function - the rows are infinite here
 import org.apache.spark.sql.functions.lit
-df.select(lit(5), lit("five"), lit(5.0)).show(10000)
+df.select(lit(5), lit("five"), lit(5.0)).show(100)
 //showing a literal being created in Spark SQL - only one row is created here
 spark.sql("""SELECT 5, "five", 5.0""").show()
 //there are different ways of specifying equality - the first example shows the equalTo() method
