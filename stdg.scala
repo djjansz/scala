@@ -655,3 +655,75 @@ dfNoNull.cube("customerId", "stockCode").agg(grouping_id(), sum("Quantity")).ord
 val pivoted = dfWithDate.groupBy("date").pivot("Country").sum()
 pivoted.printSchema
 pivoted.where("date > '2011-12-05'").select("date" ,"`USA_sum(Quantity)`").show()
+// create some datasets manually - for use in the Join examples
+val person = Seq((0, "Bill Chambers", 0, Seq(100)),(1, "Matei Zaharia", 1, Seq(500, 250, 100)),(2, "Michael Armbrust", 1, Seq(250, 100))).toDF("id", "name", "graduate_program", "spark_status")
+val graduateProgram = Seq((0, "Masters", "School of Information", "UC Berkeley"),(2, "Masters", "EECS", "UC Berkeley"),(1, "Ph.D.", "EECS", "UC Berkeley")).toDF("id", "degree", "department", "school")
+val sparkStatus = Seq((500, "Vice President"),(250, "PMC Member"),(100, "Contributor")).toDF("id", "status")
+// register these tables so that they can be used with Spark SQL
+person.createOrReplaceTempView("person")
+graduateProgram.createOrReplaceTempView("graduateProgram")
+sparkStatus.createOrReplaceTempView("sparkStatus")
+// view the datasets created manually
+person.show(5)
+graduateProgram.show(5)
+sparkStatus.show(5)
+// inner join - join the person dataframe to the graduateProgram dataframe by id
+val joinExpression = person.col("graduate_program") === graduateProgram.col("id")
+person.join(graduateProgram, joinExpression).show()  // the default is inner join 
+var joinType = "inner"
+person.join(graduateProgram, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM person JOIN graduateProgram ON person.graduate_program = graduateProgram.id""").show()
+// outer join
+joinType = "outer"
+person.join(graduateProgram, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM person FULL OUTER JOIN graduateProgram ON graduate_program = graduateProgram.id""").show()
+// left outer join
+joinType = "left_outer"
+graduateProgram.join(person, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM graduateProgram LEFT OUTER JOIN person ON person.graduate_program = graduateProgram.id""").show()
+// right outer join
+joinType = "right_outer"
+person.join(graduateProgram, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM person RIGHT OUTER JOIN graduateProgram  ON person.graduate_program = graduateProgram.id""").show()
+// left semi joins - if the right dataframees values exist in the left, these rows are kept in the result
+joinType = "left_semi"
+graduateProgram.join(person, joinExpression, joinType).show()
+val gradProgram2 = graduateProgram.union(Seq((0, "Masters", "Duplicated Row", "Duplicated School")).toDF())
+gradProgram2.createOrReplaceTempView("gradProgram2")
+gradProgram2.join(person, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM gradProgram2 LEFT SEMI JOIN person ON gradProgram2.id = person.graduate_program""").show()
+// left anti joins - keeps only the values that do not exist in the right dataframe
+joinType = "left_anti"
+graduateProgram.join(person, joinExpression, joinType).show()
+spark.sql("""SELECT * FROM graduateProgram LEFT ANTI JOIN person ON graduateProgram.id = person.graduate_program""").show()
+// cross joins aka cartesian products
+joinType = "cross"
+graduateProgram.join(person, joinExpression, joinType).show()
+person.crossJoin(graduateProgram).show() 
+spark.sql("""SELECT * FROM graduateProgram CROSS JOIN person ON graduateProgram.id = person.graduate_program""").show()
+// Joins on complex types
+import org.apache.spark.sql.functions.expr
+person.withColumnRenamed("id", "personId").join(sparkStatus, expr("array_contains(spark_status, id)")).show()
+spark.sql("""SELECT * FROM (select id as personId, name, graduate_program, spark_status FROM person) INNER JOIN sparkStatus ON array_contains(spark_status, id)""").show()
+// handling duplicate column names
+val gradProgramDupe = graduateProgram.withColumnRenamed("id", "graduate_program")
+val joinExpr = gradProgramDupe.col("graduate_program") === person.col("graduate_program")
+person.join(gradProgramDupe, joinExpr).show() // does not throw an error
+// person.join(gradProgramDupe, joinExpr).select("graduate_program").show() //throws an error saying 'graduate_program' is ambiguous, could be: graduate_program, graduate_program
+// approach 1 - use a string as the join expression, this automatically removes one of the columns for you 
+person.join(gradProgramDupe,"graduate_program").select("graduate_program").show()
+// approach 2 - drop one of the offending columns after the join
+person.join(gradProgramDupe, joinExpr).drop(person.col("graduate_program")).select("graduate_program").show()
+val joinExpr = person.col("graduate_program") === graduateProgram.col("id")
+person.join(graduateProgram, joinExpr).drop(graduateProgram.col("id")).show()
+// approach 3 - rename the column before the join
+val gradProgram3 = graduateProgram.withColumnRenamed("id", "grad_id")
+val joinExpr = person.col("graduate_program") === gradProgram3.col("grad_id")
+person.join(gradProgram3, joinExpr).show()
+// Spark has set this up as a broadcast join from looking at the explain plain
+val joinExpr = person.col("graduate_program") === graduateProgram.col("id")
+person.join(graduateProgram, joinExpr).explain()
+// give the optimizer a hint that we want to use a broadcast join
+import org.apache.spark.sql.functions.broadcast
+val joinExpr = person.col("graduate_program") === graduateProgram.col("id")
+person.join(broadcast(graduateProgram), joinExpr).explain()
