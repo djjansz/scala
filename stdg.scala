@@ -742,4 +742,31 @@ jsonFile.write.format("csv").option("mode", "OVERWRITE").option("dateFormat", "y
 // read a parquet file and then write it to a parquet file that is once again stored in a folder in the directory of the parquet name
 spark.read.format("parquet").load("/user/sjf/data/flight_data/parquet/2010-summary.parquet").show(5)
 csvFile.write.format("parquet").mode("overwrite").save("/user/sjf/data/flight_data/parquet/2010-summary.parquet")
-
+// DF => SQL
+spark.read.json("/user/sjf/data/flight_data/json/2010-summary.json").createOrReplaceTempView("2010_summary") 
+// SQL => DF
+spark.sql("""SELECT DEST_COUNTRY_NAME, sum(count) FROM 2010_summary GROUP BY DEST_COUNTRY_NAME """).where("DEST_COUNTRY_NAME like 'S%'").where("`sum(count)` > 10").count() 
+// read in a json file and create a dataframe and then a view
+val flights = spark.read.format("json").load("/user/sjf/data/flight_data/json/2015-summary.json")
+val just_usa_df = flights.where("dest_country_name = 'United States'")
+just_usa_df.createOrReplaceTempView("just_usa_view")
+// show the explain plan using the dataFrame API
+just_usa_df.selectExpr("*").explain
+// show the explain plan using Spark SQL programming
+spark.sql("""Explain select * from just_usa_view""").show(1,false)
+//show the databases avaliable
+spark.sql("""SHOW DATABASES""").show(20,false)
+// cache the view
+spark.sql("""CACHE TABLE JUST_USA_VIEW""").show(1,false)
+// unchache the view
+spark.sql("""UNCACHE TABLE JUST_USA_VIEW""").show(1,false)
+// describe table versus printSchema
+spark.sql("""DESCRIBE TABLE 2010_summary""").show()
+// show tables in ppadev like sjf
+spark.sql("""SHOW TABLES IN PPADEV like 'SJF*'""").show(100,false)
+// view system functions
+spark.sql("""SHOW SYSTEM FUNCTIONS""").show(100,false)
+// create a user defined function for Spark SQL
+def power3(number:Double):Double = number * number * number
+spark.udf.register("power3", power3(_:Double):Double)
+spark.sql("""SELECT count, power3(count) as count_cubed FROM 2010_summary""").show()
