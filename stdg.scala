@@ -727,3 +727,19 @@ person.join(graduateProgram, joinExpr).explain()
 import org.apache.spark.sql.functions.broadcast
 val joinExpr = person.col("graduate_program") === graduateProgram.col("id")
 person.join(broadcast(graduateProgram), joinExpr).explain()
+// read in the data without defining a schema
+spark.read.format("csv").option("header", "true").option("mode", "FAILFAST").option("inferSchema", "true").load("/user/sjf/data/flight_data/csv/2010-summary.csv").show(2)
+// import a csv file and manually define a schema
+import org.apache.spark.sql.types.{StructField, StructType, StringType, LongType}
+val myManualSchema = new StructType(Array(new StructField("DEST_COUNTRY_NAME", StringType, true),new StructField("ORIGIN_COUNTRY_NAME", StringType, true),new StructField("count", LongType, false)))
+spark.read.format("csv").option("header", "true").option("mode", "FAILFAST").schema(myManualSchema).load("/user/sjf/data/flight_data/csv/2010-summary.csv").show(5)
+// read in a comma separated values file and write a tab separated values file
+val csvFile = spark.read.format("csv").option("header", "true").option("mode", "FAILFAST").schema(myManualSchema).load("/user/sjf/data/flight_data/csv/2010-summary.csv")
+csvFile.write.format("csv").mode("overwrite").option("sep", "\t").save("/user/sjf/data/flight_data/tsv/2010-summary.tsv")
+// read a json file and write it to a csv file - the output is a directory that contains a randomly named file that holds the csv data
+val jsonFile = spark.read.format("json").option("mode", "FAILFAST").schema(myManualSchema).load("/user/sjf/data/flight_data/json/2010-summary.json")
+jsonFile.write.format("csv").option("mode", "OVERWRITE").option("dateFormat", "yyyy-MM-dd").option("path", "/user/sjf/data/flight_data/csv/2010-summary.csv").save()
+// read a parquet file and then write it to a parquet file that is once again stored in a folder in the directory of the parquet name
+spark.read.format("parquet").load("/user/sjf/data/flight_data/parquet/2010-summary.parquet").show(5)
+csvFile.write.format("parquet").mode("overwrite").save("/user/sjf/data/flight_data/parquet/2010-summary.parquet")
+
