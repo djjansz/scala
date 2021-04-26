@@ -423,7 +423,7 @@ df.select($"StockCode",monotonically_increasing_id().alias("monotinc")).show(10)
 // capitalize every initial word in a string, similar to Excel's PROPCASE function
 import org.apache.spark.sql.functions.{initcap}
 df.select($"Description",initcap(col("Description"))).show(2, false)
-// make an all upper case columna nd an all lower case column
+// make an all upper case columna and an all lower case column
 import org.apache.spark.sql.functions.{lower, upper}
 df.select(col("Description"),lower(col("Description")),upper(lower(col("Description")))).show(2)
 // adding or removing spaces around a string with left/right pad/trim
@@ -440,7 +440,7 @@ import org.apache.spark.sql.functions.regexp_replace
 val simpleColors = Seq("black", "white", "red", "green", "blue")
 // String = BLACK|WHITE|RED|GREEN|BLUE
 val regexString = simpleColors.map(_.toUpperCase).mkString("|")
-// the | signifies `OR` in regular expression syntax - here we replace the colors with the word COLOR
+// the | signifies `OR` in regular expression syntax - where we replace the colors with the word COLOR
 df.select(regexp_replace(col("Description"), regexString, "COLOR").alias("color_clean"),col("Description")).show(10,false)
 spark.sql("""SELECT regexp_replace(Description, 'BLACK|WHITE|RED|GREEN|BLUE', 'COLOR') as color_clean, Description FROM dfTable""").show(10,false)
 // L gets replaced by 1, E gets replaced by 3, and T gets replaced by 7
@@ -461,7 +461,7 @@ spark.sql("""SELECT Description FROM dfTable WHERE instr(Description, 'BLACK') >
 val simpleColors = Seq("black", "white", "red", "green", "blue")
 val selectedColumns = simpleColors.map(color => {col("Description").contains(color.toUpperCase).alias(s"is_$color")}):+expr("*") 
 df.select(selectedColumns:_*).where(col("is_white").or(col("is_black"))).select("Description").show(30, false)
-// Dates and Times - onnly InvoiceDate is a timestamp in this dataFrame
+// Dates and Times - only InvoiceDate is a timestamp in this dataFrame
 df.printSchema()
 // create a dataFrame with 10 rows of the same thing which is the current date and the current time
 import org.apache.spark.sql.functions.{current_date, current_timestamp}
@@ -473,7 +473,7 @@ dateDF.printSchema()
 import org.apache.spark.sql.functions.{date_add, date_sub}
 dateDF.select(date_sub(col("today"), 5), date_add(col("today"), 5)).show(1)
 spark.sql("""SELECT date_sub(today, 5), date_add(today, 5) FROM dateTable""").show(1)
-// findiing the days between two dates and the months between two dates
+// finding the days between two dates and the months between two dates
 import org.apache.spark.sql.functions.{datediff, months_between, to_date}
 dateDF.withColumn("week_ago", date_sub(col("today"), 7)).select(datediff(col("week_ago"), col("today"))).show(1)
 dateDF.select(to_date(lit("2016-01-01")).alias("start"),to_date(lit("2017-05-22")).alias("end")).select(months_between(col("start"), col("end"))).show(1)
